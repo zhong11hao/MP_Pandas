@@ -62,11 +62,11 @@ def mp_groupby(df_in, gb_cols, gb_func, *gb_func_args, **mp_args):
 
     # build the processing groups
     if n_queues == n_cpus:                                       # create as many task queues as CPUs
-        df_groups = df_grouper(df_in, gb_cols, n_cpus)           # processing groups for dfs
+        df_groups, srt_df = df_grouper(df_in, gb_cols, n_cpus)           # processing groups for dfs
     else:                                                        # create a single task queue
-        df_groups = df_grouper(df_in, gb_cols, 1)
+        df_groups, srt_df = df_grouper(df_in, gb_cols, 1)
 
-    gb_func_args += (df_in, )                                           # append df_in to func args
+    gb_func_args += (srt_df, )                                           # append srt_df to func args
     mp_func_by_groups = simple_parallel(func_by_groups, n_cpus)         # a general template that groups a function used in a pd groupby
     result = mp_func_by_groups(df_groups.keys(), df_groups, gb_func, *gb_func_args)
     if len(result) > 0:
@@ -100,12 +100,12 @@ def df_grouper(df, gb_cols, n_groups):
     # prepare the index dict to iterate
     idx_dict = dict()
     if len(gb_cols) > 0:                                          # traditional group_by + apply
-        srt_df = df.sort(columns=gb_cols).reset_index(drop=True)  # sorting by gb cols makes the index continuous in each group! All we have to do is identify group boundaries!
+        srt_df = df.sort_values(gb_cols).reset_index(drop=True)  # sorting by gb cols makes the index continuous in each group! All we have to do is identify group boundaries!
         g = srt_df.groupby(gb_cols)
         idx_dict = {np.min(v): len(v) for v in g.indices.values()}
     else:                                                         # plain apply (to rows?)
-        df.reset_index(inplace=True, drop=True)
-        sz, r = divmod(len(df), n_groups)
+        srt_df = df.reset_index(drop=True)
+        sz, r = divmod(len(srt_df), n_groups)
         start = sz + r
         idx_dict[0] = start
         for _ in range(1, n_groups):
@@ -114,7 +114,7 @@ def df_grouper(df, gb_cols, n_groups):
 
     groups = mp_balancer(idx_dict.keys(), n_groups, idx_dict.values())    # groups[k] = [tid1, tid2, ...]
     df_grp = {g: [(s, idx_dict[s]) for s in groups[g]] for g in groups}   # df_grp[k] = [..., (idx_start, len), ...]
-    return df_grp
+    return (df_grp, srt_df)
 
 
 def func_by_groups(key, group_dict, func, *args):
